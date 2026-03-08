@@ -54,7 +54,8 @@
 #endif
 
 // Window size
-#define WIDTH_MIN 68
+#define WIDTH_MIN 44
+#define WIDTH_CLOCK_MIN 68
 #define WIDTH_MARGIN 4
 #define HEIGHT_MIN 5
 #define HEIGHT_MARGIN 4
@@ -532,15 +533,17 @@ static void paint_plot(void) {
 
     mvaddstr(height - 1, width - strlen(verstring) - 1, verstring);
 
-    const char *clock_display;
-    if (fake_clock) {
-        clock_display = "Thu Jan  1 00:00:00 1970 ";
-    } else {
-        lt = localtime(&now.tv_sec);
-        asctime_r(lt, ls);
-        clock_display = ls;
+    if (width >= WIDTH_CLOCK_MIN) {
+        const char *clock_display;
+        if (fake_clock) {
+            clock_display = "Thu Jan  1 00:00:00 1970 ";
+        } else {
+            lt = localtime(&now.tv_sec);
+            asctime_r(lt, ls);
+            clock_display = ls;
+        }
+        mvaddstr(height - 2, width - strlen(clock_display), clock_display);
     }
-    mvaddstr(height - 2, width - strlen(clock_display), clock_display);
 
     if (colors[TEXT_COLOR] != -1)
         attroff(COLOR_PAIR(TEXT_COLOR + 1));
