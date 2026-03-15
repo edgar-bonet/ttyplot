@@ -53,6 +53,12 @@
 #define T_LLCR ACS_LLCORNER
 #endif
 
+// Window size
+#define WIDTH_MIN 68
+#define WIDTH_MARGIN 4
+#define HEIGHT_MIN 5
+#define HEIGHT_MARGIN 4
+
 // Define standard curses color constants for better readability
 #define C_BLACK 0
 #define C_RED 1
@@ -91,7 +97,7 @@ static double softmax = 0.0, hardmax = FLT_MAX, softmin = 0.0, hardmin = -FLT_MA
 static char title[256] = ".: ttyplot :.", unit[64] = {0}, ls[256] = {0};
 static double values1[1024] = {0}, values2[1024] = {0};
 static int width = 0, height = 0, n = -1, v = 0, c = 0, rate = 0, two = 0,
-           plotwidth = 0, plotheight = 0;
+           plotwidth = WIDTH_MIN - WIDTH_MARGIN, plotheight = 0;
 static bool fake_clock = false;
 static char *errstr = NULL;
 static bool redraw_needed = false;
@@ -485,7 +491,7 @@ static void show_all_centered(const char *message) {
 }
 
 static int window_big_enough_to_draw(void) {
-    return (width >= 68) && (height >= 5);
+    return (width >= WIDTH_MIN) && (height >= HEIGHT_MIN);
 }
 
 static void show_window_size_error(void) {
@@ -500,8 +506,8 @@ static void paint_plot(void) {
     erase();
     getmaxyx(stdscr, height, width);
 
-    plotheight = height - 4;
-    plotwidth = width - 4;
+    plotheight = height - HEIGHT_MARGIN;
+    plotwidth = width - WIDTH_MARGIN;
     if (plotwidth >= (int)((sizeof(values1) / sizeof(double)) - 1))
         exit(0);
 
