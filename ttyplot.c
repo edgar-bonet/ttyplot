@@ -537,13 +537,14 @@ static void paint_plot(void) {
     if (width >= WIDTH_CLOCK_MIN) {
         const char *clock_display;
         if (fake_clock) {
-            clock_display = "Thu Jan  1 00:00:00 1970 ";
+            clock_display = "Thu Jan  1 00:00:00 1970";
         } else {
             lt = localtime(&now.tv_sec);
             asctime_r(lt, ls);
+            ls[strlen(ls) - 1] = '\0';  // drop trailing newline, see asctime_r(3)
             clock_display = ls;
         }
-        mvaddstr(height - 2, width - strlen(clock_display), clock_display);
+        mvaddstr(height - 2, width - strlen(clock_display) - 1, clock_display);
     }
 
     if (colors[TEXT_COLOR] != -1)
