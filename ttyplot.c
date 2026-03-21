@@ -54,8 +54,9 @@
 #endif
 
 // Window size
+#define WIDTH_CLOCK 24  // strlen("Thu Jan  1 00:00:00 1970")
 #define WIDTH_MIN 44
-#define WIDTH_CLOCK_MIN 68
+#define WIDTH_CLOCK_MIN (WIDTH_MIN + WIDTH_CLOCK)
 #define WIDTH_MARGIN 4
 #define HEIGHT_MIN 5
 #define HEIGHT_MARGIN 4
