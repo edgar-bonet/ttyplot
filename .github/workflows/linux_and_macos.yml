@@ -27,26 +27,23 @@ jobs:
           # Failing test
           - cc: clang-20
             clang_major_version: 20
+            sanitized: true
+            make: bsdmake
+            runs-on: macos-26
+
+          # Without sanitizer
+          - cc: clang-20
+            clang_major_version: 20
+            sanitized: false
             make: bsdmake
             runs-on: macos-26
 
           # default clang = Clang 21
           - cc: clang
             clang_major_version: null
+            sanitized: true
             make: bsdmake
             runs-on: macos-26
-
-          # GCC 15
-          - cc: gcc-15
-            clang_major_version: null
-            make: bsdmake
-            runs-on: macos-26
-
-          # macOS 15
-          - cc: clang-20
-            clang_major_version: 20
-            make: bsdmake
-            runs-on: macos-15
 
     steps:
       - name: Install build dependencies
@@ -71,8 +68,17 @@ jobs:
           MAKE: ${{ matrix.make }}
         run: |-
           set -x
+
+          # try the sanitizers
+          if [[ ${{ matrix.sanitized }} = true ]]; then
+            sanitizer='-fsanitize=address,undefined -fno-sanitize-recover=all'
+          else
+            sanitizer=
+          fi
+
           ${MAKE} --version 2>/dev/null || true
-          CFLAGS="-std=c99 -pedantic -Werror -O1" ${MAKE}
+
+          CFLAGS="-std=c99 -pedantic -Werror ${sanitizer} -O1" ${MAKE}
 
       - name: 'Install'
         env:
