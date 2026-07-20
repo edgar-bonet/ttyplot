@@ -18,42 +18,81 @@ jobs:
   linux:
     name: Build (${{ matrix.cc }}/${{ matrix.make }} on ${{ matrix.runs-on }})
     runs-on: ${{ matrix.runs-on }}
-    continue-on-error: true
+    # Preview/experimental runners (see matrix.experimental) may fail without
+    # blocking CI. macos-26 currently renders a blank UI (the sanitizer build
+    # produces no output there); it is unreproducible on macos-14/macos-15.
+    continue-on-error: ${{ matrix.experimental || false }}
     strategy:
       fail-fast: false
       matrix:
         include:
-
-          # Failing test
-          - cc: clang-20
-            clang_major_version: 20
-            sanitized: true
-            make: bsdmake
-            runs-on: macos-26
-
-          # Without sanitizer
-          - cc: clang-20
-            clang_major_version: 20
-            sanitized: false
-            make: bsdmake
-            runs-on: macos-26
-
-          # default clang = Clang 21
-          - cc: clang
+          - cc: gcc-14
             clang_major_version: null
-            sanitized: true
+            clang_repo_suffix: null
+            make: make
+            runs-on: ubuntu-24.04
+          - cc: clang-18
+            clang_major_version: 18
+            clang_repo_suffix: -18
+            make: bmake
+            runs-on: ubuntu-22.04
+          - cc: musl-gcc
+            clang_major_version: null
+            clang_repo_suffix: null
+            make: bmake
+            runs-on: ubuntu-22.04
+          - cc: gcc-13
+            clang_major_version: null
+            clang_repo_suffix: null
+            make: make
+            runs-on: macos-14
+          - cc: gcc-15
+            clang_major_version: null
+            clang_repo_suffix: null
+            make: bmake
+            runs-on: macos-15-intel
+          - cc: clang-20
+            clang_major_version: 20
+            clang_repo_suffix: null
             make: bsdmake
             runs-on: macos-26
-
+            experimental: true  # preview OS; UI test renders blank (see continue-on-error above)
     steps:
+      - name: Add Clang/LLVM repositories
+        if: "${{ runner.os == 'Linux' && contains(matrix.cc, 'clang') }}"
+        run: |-
+          set -x
+          source /etc/os-release
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          sudo add-apt-repository "deb http://apt.llvm.org/${UBUNTU_CODENAME}/ llvm-toolchain-${UBUNTU_CODENAME}${{ matrix.clang_repo_suffix }} main"
+
       - name: Install build dependencies
+        if: "${{ runner.os == 'Linux' }}"
+        run: |-
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            bmake \
+            libncurses-dev \
+            musl-tools \
+            pkg-config
+
+      - name: Install build dependencies
+        if: "${{ runner.os == 'macOS' }}"
         run: |-
           brew install \
+            bmake \
             bsdmake \
             coreutils
 
+      - name: Install build dependency Clang ${{ matrix.clang_major_version }}
+        if: "${{ runner.os == 'Linux' && contains(matrix.cc, 'clang') }}"
+        run: |-
+          sudo apt-get install --yes --no-install-recommends -V \
+              clang-${{ matrix.clang_major_version }} \
+              libclang-rt-${{ matrix.clang_major_version }}-dev
+
       - name: Add versioned aliases for Clang ${{ matrix.clang_major_version }}
-        if: "${{ contains(matrix.cc, 'clang-') }}"
+        if: "${{ runner.os == 'macOS' && contains(matrix.cc, 'clang') }}"
         run: |-
           set -x
           sudo ln -s "$(brew --prefix llvm@${{ matrix.clang_major_version }})"/bin/clang   /usr/local/bin/clang-${{ matrix.clang_major_version }}
@@ -62,6 +101,46 @@ jobs:
       - name: Checkout Git branch
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
 
+      - name: Build musl Ncurses
+        if: "${{ runner.os == 'Linux' && contains(matrix.cc, 'musl') }}"
+        run: |-
+          set -x -o pipefail
+
+          sudo apt-get remove --yes libncurses-dev  # to be sure to not mix them
+
+          wget -q https://invisible-island.net/datafiles/release/ncurses.tar.gz
+          tar xf ncurses.tar.gz
+          pushd ncurses-*/
+          configure_args=(
+            # Redirect everything to musl
+            CC=musl-gcc
+            --prefix=/usr
+            --includedir=/usr/include/x86_64-linux-musl
+            --libdir=/usr/lib/x86_64-linux-musl
+
+            # Enable things we rely on
+            --enable-pc-files
+            --enable-shared
+            --enable-widec
+
+            # Disable things we don't need (to speed up CI)
+            --disable-static
+            --without-cxx-binding
+            --without-manpages
+            --without-progs
+            --without-tack
+            --without-tests
+          )
+          ./configure "${configure_args[@]}"
+          make -j$(nproc)
+          sudo make install
+          popd
+          rm -Rf ncurses-*/ ncurses.tar.gz
+
+          # Mass-fix "#include <x86_64-linux-musl/foo.h>" to "#include <foo.h>"
+          grep -RlF "<x86_64-linux-musl/" /usr/include/x86_64-linux-musl/ \
+              | xargs sudo sed 's,<x86_64-linux-musl/,<,' -i
+
       - name: 'Build'
         env:
           CC: ${{ matrix.cc }}
@@ -69,16 +148,26 @@ jobs:
         run: |-
           set -x
 
-          # try the sanitizers
-          if [[ ${{ matrix.sanitized }} = true ]]; then
-            sanitizer='-fsanitize=address,undefined -fno-sanitize-recover=all'
+          # macOS default linker does not seem to support --as-needed,
+          # would error out saying "ld: unknown option: --as-needed"
+          if [[ ${{ runner.os }} = macOS ]]; then
+            as_needed=
           else
+            as_needed='-Wl,--as-needed'
+          fi
+
+          # musl-gcc and gcc/macOS do not seem to support linking with sanitizers
+          if [[ ${{ matrix.cc }} =~ musl || ${{ matrix.cc }} =~ gcc && ${{ matrix.runs-on }} =~ macos ]]; then
             sanitizer=
+          else
+            # ASan: https://clang.llvm.org/docs/AddressSanitizer.html
+            # UBSan: https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html
+            sanitizer='-fsanitize=address,undefined -fno-sanitize-recover=all'
           fi
 
           ${MAKE} --version 2>/dev/null || true
 
-          CFLAGS="-std=c99 -pedantic -Werror ${sanitizer} -O1" ${MAKE}
+          CFLAGS="-std=c99 -pedantic -Werror ${sanitizer} -O1" LDFLAGS="${as_needed} ${sanitizer}" ${MAKE}
 
       - name: 'Install'
         env:
@@ -87,6 +176,14 @@ jobs:
           set -x -o pipefail
           ${MAKE} install DESTDIR="${PWD}"/ROOT/
           find ROOT/ | sort | xargs ls -ld
+
+      - name: 'Uninstall'
+        env:
+          MAKE: ${{ matrix.make }}
+        run: |-
+          set -x
+          ${MAKE} uninstall DESTDIR="${PWD}"/ROOT/
+          [[ "$(find ROOT/ -not -type d | tee /dev/stderr)" == '' ]]  # i.e. fail CI if leftover files
 
       - name: 'Run UI tests'
         run: |-
@@ -117,3 +214,11 @@ jobs:
           sed "s/@VERSION@/$VERSION/" recordings/template.txt > recordings/expected.txt
           diff -u recordings/{expected,actual}.txt
           rm -f recordings/{expected,actual}.txt
+
+      - name: 'Clean'
+        env:
+          MAKE: ${{ matrix.make }}
+        run: |-
+          set -x -o pipefail
+          ${MAKE} clean
+          [[ "$(git ls-files -o | tee /dev/stderr | wc -l)" -eq 0 ]]
